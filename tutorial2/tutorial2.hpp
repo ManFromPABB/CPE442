@@ -4,9 +4,16 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/highgui.hpp>
+#include <cmath>
 
-static const signed char Gx_arr[] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
-static const signed char Gy_arr[] = {1, 2, 1, 0, 0, 0, -1, -2, -1};
+typedef struct BGR {
+    uchar B;
+    uchar G;
+    uchar R;
+} BGR;
 
-static const cv::Mat Gx(3, 3, CV_8S, (void *) Gx_arr);
-static const cv::Mat Gy(3, 3, CV_8S, (void *) Gy_arr);
+typedef struct BGRS {
+    short B;
+    short G;
+    short R;
+} BGRS;
