@@ -1,6 +1,6 @@
 CC := g++ # name of the compiler to use
 OUTPUT := sobel # name of the output file
-LDFLAGS := -o $(OUTPUT) -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_highgui -lopencv_videoio # linker flags (-o is optional)
+LDFLAGS := -o $(OUTPUT) -lopencv_core -lopencv_highgui -lopencv_videoio # linker flags (-o is optional)
 CFLAGS := -g -Wall -Wpedantic -std=c++11 -I/usr/include/opencv4 -o0 # build flags
 
 FILES := # add additional build files here
