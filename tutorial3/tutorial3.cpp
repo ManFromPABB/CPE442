@@ -1,5 +1,7 @@
 #include "tutorial3.hpp"
 
+pthread_barrier_t barrier;
+
 namespace filter {
 
     static inline int greyscale(int R, int G, int B);
@@ -67,7 +69,6 @@ int main(int argc, char *argv[]) {
     if (argc != 2) {
         throw std::runtime_error("tutorial2 requires one argument, the video to open...\n");
     }
-
     cv::VideoCapture capture(argv[1]);
     cv::Mat image, greyscale, sobel;
 
@@ -77,17 +78,21 @@ int main(int argc, char *argv[]) {
 
     cv::namedWindow("sobel", 1); // initialize display window
 
-    int nthreads = sysconf(_SC_NPROCESSORS_ONLN);
+    int nthreads = 5;
     pthread_t thread_table[nthreads];
-
-    mmap(&image, sizeof(image), PROT_READ, MAP_SHARED | MAP_ANONYMOUS, -1, -1); // mapping needs to be fixed to point to image_data
-
+    pthread_barrier_init(&barrier, NULL, nthreads);
     image_data data;
 
     for (size_t i = 0; i < nthreads; i++) {
         pthread_create(&thread_table[i], NULL, process_image, &data);
     }
 
+    while(true)
+    {
+        cap >> data.image;
+        if (image.empty()) break; // exit if no more frames
+        greyscale()
+    }
     return 0;
 }
 

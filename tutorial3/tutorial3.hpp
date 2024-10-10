@@ -12,4 +12,9 @@
 typedef struct image_data {
     cv::VideoCapture capture;
     pthread_t thread_table[];
+    cv::Mat image;
+    cv::Mat greyscale;
+    cv::Mat sobel;
+
+
 } image_data;
