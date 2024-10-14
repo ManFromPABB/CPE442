@@ -1,6 +1,6 @@
 #include "tutorial3.hpp"
 
-pthread_barrier_t barrier;
+pthread_barrier_t workers_done, workers_ready;
 
 namespace filter {
 
@@ -34,7 +34,6 @@ namespace filter {
     }
 
     cv::Mat apply_convolution(cv::Mat image) {
-        cv::Mat sobel = cv::Mat::zeros(image.size(), CV_8U); // initialize the output matrix as a 8U matrix
         for (int i = 1; i < image.rows - 1; i++) {
             for (int j = 1; j < image.cols - 1; j++) {
 
@@ -69,8 +68,8 @@ int main(int argc, char *argv[]) {
     if (argc != 2) {
         throw std::runtime_error("tutorial2 requires one argument, the video to open...\n");
     }
+
     cv::VideoCapture capture(argv[1]);
-    cv::Mat image, greyscale, sobel;
 
     if (!capture.isOpened()) {
         throw std::runtime_error("file cannot be opened...\n");
@@ -78,36 +77,48 @@ int main(int argc, char *argv[]) {
 
     cv::namedWindow("sobel", 1); // initialize display window
 
-    int nthreads = 5;
-    pthread_t thread_table[nthreads];
-    pthread_barrier_init(&barrier, NULL, nthreads);
+    int numworkers = NUMWORKERS;
+    pthread_t *worker_threads = new pthread_t[numworkers];
     image_data data;
+    pthread_barrier_init(&workers_done, NULL, numworkers);
+    pthread_barrier_init(&workers_ready, NULL, numworkers);
 
-    for (size_t i = 0; i < nthreads; i++) {
-        pthread_create(&thread_table[i], NULL, process_image, &data);
+    for (int i = 0; i < numworkers; i++) {
+        data.threadid = i;
+        pthread_create(&worker_threads[i], NULL, process_image, &data);
     }
 
-    while(true)
-    {
-        cap >> data.image;
-        if (image.empty()) break; // exit if no more frames
-        greyscale()
+    capture >> data.image; // grab first frame to determine its size
+    data.greyscale = cv::Mat::zeros(data.image.size(), CV_8U); // initialize the greyscale matrix as a 8U matrix
+    data.sobel = cv::Mat::zeros(data.image.size(), CV_8U); // initialize the greyscale matrix as a 8U matrix
+
+    while (true) {
+        pthread_barrier_wait(&workers_ready);
+        if (data.image.empty()) break; // exit if no more frames
+        data.greyscale = filter::apply_greyscale(data.image);
+        pthread_barrier_wait(&workers_done);
+        cv::imshow("sobel", data.sobel);
+        cv::waitKey(1);
+        capture >> data.image;
     }
+
+    for (int i = 0; i < numworkers; i++) {
+        pthread_join(worker_threads[i], NULL);
+    }
+
+    pthread_barrier_destroy(&workers_done);
+    pthread_barrier_destroy(&workers_ready);
+
     return 0;
 }
 
 void* process_image(void *arg) {
-    image_data* args = (image_data *) arg;
-    cv::Mat image, greyscale, sobel;
-    int framesCreated = 0;
-    while (true) {
-        args->capture >> image; // get next image from video stream
-        if (image.empty()) break; // exit if no more frames
-        greyscale = filter::apply_greyscale(image); // apply greyscaling to the current image in-place
-        sobel = filter::apply_convolution(greyscale); // apply the Sobel filter to the given frame
-        framesCreated++; // increment frame counter
-        printf("%d/%d frames computed...\n", framesCreated, (int) args->capture.get(cv::CAP_PROP_FRAME_COUNT));
-        cv::imshow("sobel", sobel); // display the image
-	    cv::waitKey(1);
-    }
+    image_data* data = (image_data *) arg;
+    pthread_barrier_wait(&workers_ready);
+    int chunk_size = data->greyscale.rows / NUMWORKERS;
+    int start_index = data->threadid * chunk_size;
+    int end_index = (data->threadid == NUMWORKERS - 1) ? data->greyscale.rows - 1 : (start_index + chunk_size - 1);
+    
+    pthread_barrier_wait(&workers_done);
+    return NULL;
 }

@@ -9,12 +9,13 @@
 #include <opencv2/highgui.hpp>
 #include <cmath>
 
+#define NUMWORKERS 4
+
 typedef struct image_data {
-    cv::VideoCapture capture;
-    pthread_t thread_table[];
     cv::Mat image;
     cv::Mat greyscale;
     cv::Mat sobel;
-
-
+    int threadid;
 } image_data;
+
+void* process_image(void *arg);
