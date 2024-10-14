@@ -12,10 +12,14 @@
 #define NUMWORKERS 4
 
 typedef struct image_data {
-    cv::Mat image;
-    cv::Mat greyscale;
-    cv::Mat sobel;
-    int threadid;
+    cv::Mat *image;
+    cv::Mat *greyscale;
+    cv::Mat *sobel;
 } image_data;
+
+typedef struct thread_data {
+    image_data *data;
+    int threadid;
+} thread_data;
 
 void* process_image(void *arg);
