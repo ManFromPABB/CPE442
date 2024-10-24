@@ -8,6 +8,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/highgui.hpp>
 #include <cmath>
+#include <arm_neon.h>
 
 #define NUMWORKERS 4
 

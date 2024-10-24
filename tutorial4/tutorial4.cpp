@@ -1,4 +1,4 @@
-#include "tutorial3.hpp"
+#include "tutorial4.hpp"
 
 pthread_barrier_t workers_done, workers_ready;
 
@@ -32,23 +32,30 @@ namespace filter {
     }
 
     void apply_convolution(cv::Mat image, cv::Mat sobel, int row) {
-        for (int j = 1; j < image.cols - 1; j++) {
-
-            short gradX = 0, gradY = 0, gradMag; // initialize intermediate calc values as shorts to prevent overflow
+        for (int j = 1; j < image.cols - 1; j += 8) {
+            
+            int16x8_t gradX = vdupq_n_s16(0);
+            int16x8_t gradY = vdupq_n_s16(0);
 
             for (int ki = -1; ki <= 1; ki++) {
                 for (int kj = -1; kj <= 1; kj++) {
-                    uchar anchor = image.ptr<uchar>(row + ki)[j + kj]; // get BGR value for the pixel position + the convolution offset
-                    gradX += anchor * filter::Gx[ki + 1][kj + 1]; // calculate the X gradient from the X kernel
-                    gradY += anchor * filter::Gy[ki + 1][kj + 1]; // calculate the Y gradient from the Y kernel
+                    uint8x8_t anchor_vector = vld1_u8(&image.ptr<uchar>(row + ki)[j + kj]); // get BGR value for the pixel position + the convolution offset
+                    int16x8_t anchor_vector_int = vreinterpretq_s16_u16(vmovl_u8(anchor_vector));
+                    int16x8_t Gx_coeff = vdupq_n_s16(Gx[ki + 1][kj + 1]);
+                    int16x8_t Gy_coeff = vdupq_n_s16(Gy[ki + 1][kj + 1]);
+                    gradX = vmlaq_s16(gradX, anchor_vector_int, Gx_coeff); // vector multiply filter by Gx coefficients and accumulate
+                    gradY = vmlaq_s16(gradY, anchor_vector_int, Gy_coeff); // vector multiply filter by Gy coefficients and accumulate
                 }
             }
 
-            gradMag = abs(gradX) + abs(gradY); // approximate gradient magnitude from absolute value of component sums
+            int16x8_t absGradX = vabsq_s16(gradX);
+            int16x8_t absGradY = vabsq_s16(gradY);
+            int16x8_t gradMag = vaddq_s16(absGradX, absGradY); // approximate gradient magnitude from absolute value of component sums
 
-            if (gradMag > 255) gradMag = 255;
+            uint16x8_t gradMag_u = vreinterpretq_u16_s16(gradMag);
+            uint8x8_t result_vec = vqmovn_u16(gradMag_u); // compute max on all vector elements such that they are less than 255
 
-            sobel.ptr<uchar>(row)[j] = gradMag; // set BGR elements of pixel to corresponding filtered value
+            vst1_u8(&sobel.ptr<uchar>(row)[j], result_vec); // set BGR elements of pixel to corresponding filtered value
         }
     }
 
@@ -98,11 +105,11 @@ int main(int argc, char *argv[]) {
     while (true) {
         pthread_barrier_wait(&workers_ready);
         if (data.image->empty()) break; // exit if no more frames
-        filter::apply_greyscale(*data.image, *data.greyscale);
-        pthread_barrier_wait(&workers_done);
-        cv::imshow("sobel", *data.sobel);
+        filter::apply_greyscale(*data.image, *data.greyscale); // compute greyscale in main thread
+        pthread_barrier_wait(&workers_done); // wait for worker threads to finish the sobel frame
+        cv::imshow("sobel", *data.sobel); // display the new frame
         cv::waitKey(1);
-        capture >> *data.image;
+        capture >> *data.image; // grab a new frame and pass to the worker threads
     }
 
     for (int i = 0; i < numworkers; i++) {
@@ -118,13 +125,13 @@ int main(int argc, char *argv[]) {
 void* process_image(void *arg) {
     thread_data *threaddata = (thread_data *) arg;
     image_data *data = threaddata->data;
-    
+
     while (true) {
         pthread_barrier_wait(&workers_ready);
 
         if (data->image->empty()) return NULL;
         
-        int chunk_size = data->greyscale->rows / NUMWORKERS;
+        int chunk_size = data->greyscale->rows / NUMWORKERS; // determine the size of each thread's processing chunk
         int start_index = std::max(1, threaddata->threadid * chunk_size);
         int end_index = std::min(data->greyscale->rows - 1, (threaddata->threadid == NUMWORKERS - 1) ? data->greyscale->rows : (start_index + chunk_size));
 
