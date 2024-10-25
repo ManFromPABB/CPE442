@@ -14,19 +14,38 @@ namespace filter {
                                          {-1, -2, -1}};
 
     void apply_greyscale(cv::Mat image, cv::Mat grey_image) {
-        unsigned char *rgb = (unsigned char *) image.data;
         int channels = image.channels();
         for (int i = 0; i < image.rows; i++) {
-            for (int j = 0; j < image.cols; j++) {
+            for (int j = 0; j < image.cols; j += 8) {
                 int index = i * image.step + j * channels; // calculate data offset from current position/channel
 
-                unsigned char b = rgb[index];
-                unsigned char g = rgb[index + 1];
-                unsigned char r = rgb[index + 2];
+                uint8x8x3_t rgb_vec = vld3_u8(&image.data[index]); // load 24 bytes of data representing 8 pixels into a uint8 8x3 matrix
 
-                unsigned char grey = greyscale(r, g, b); // calculate the grey value
+                // split each matrix into uint8 vectors for each color
+                uint16x8_t r_vec = vmovl_u8(rgb_vec.val[0]);
+                uint16x8_t g_vec = vmovl_u8(rgb_vec.val[1]);
+                uint16x8_t b_vec = vmovl_u8(rgb_vec.val[2]);
+                
+                float32x4_t r_low_f = vcvtq_f32_u32(vmovl_u16(vget_low_u16(r_vec))); // get lower 4 values from red vector and convert to float32
+                float32x4_t r_high_f = vcvtq_f32_u32(vmovl_u16(vget_high_u16(r_vec))); // get high 4 values from red vector and convert to float32
+                float32x4_t g_low_f = vcvtq_f32_u32(vmovl_u16(vget_low_u16(g_vec))); // get lower 4 values from green vector and convert to float32
+                float32x4_t g_high_f = vcvtq_f32_u32(vmovl_u16(vget_high_u16(g_vec))); // get high 4 values from green vector and convert to float32
+                float32x4_t b_low_f = vcvtq_f32_u32(vmovl_u16(vget_low_u16(b_vec))); // get lower 4 values from blue vector and convert to float32
+                float32x4_t b_high_f = vcvtq_f32_u32(vmovl_u16(vget_high_u16(b_vec))); // get high 4 values from blue vector and convert to float32
 
-                grey_image.ptr<uchar>(i)[j] = grey;
+                float32x4_t grey_low_f = vmlaq_n_f32(vmulq_n_f32(r_low_f, 0.2126f), g_low_f, 0.7152f); // do the multiplication on low red and green vectors and add 
+                grey_low_f = vmlaq_n_f32(grey_low_f, b_low_f, 0.0722f); // finish the low grey calculations by multiplying the blue and accumulating
+
+                float32x4_t grey_high_f = vmlaq_n_f32(vmulq_n_f32(r_high_f, 0.2126f), g_high_f, 0.7152f); // do the multiplication on high red and green vectors and add
+                grey_high_f = vmlaq_n_f32(grey_high_f, b_high_f, 0.0722f); // finish the high grey calculations by multiplying the blue and accumulating
+
+                // convert float32x4 to uint16x4
+                uint16x4_t grey_low_u16 = vmovn_u32(vcvtq_u32_f32(grey_low_f));
+                uint16x4_t grey_high_u16 = vmovn_u32(vcvtq_u32_f32(grey_high_f));
+
+                uint8x8_t grey_u8 = vqmovn_u16(vcombine_u16(grey_low_u16, grey_high_u16)); // collapse the low/high uint16x4 vectors into a single uint8x8 vector
+
+                vst1_u8(&grey_image.ptr<uchar>(i)[j], grey_u8); // store all 8 grey pixels into their respective locations
             }
         }
     }
@@ -40,19 +59,19 @@ namespace filter {
             for (int ki = -1; ki <= 1; ki++) {
                 for (int kj = -1; kj <= 1; kj++) {
                     uint8x8_t anchor_vector = vld1_u8(&image.ptr<uchar>(row + ki)[j + kj]); // get BGR value for the pixel position + the convolution offset
-                    int16x8_t anchor_vector_int = vreinterpretq_s16_u16(vmovl_u8(anchor_vector));
-                    int16x8_t Gx_coeff = vdupq_n_s16(Gx[ki + 1][kj + 1]);
-                    int16x8_t Gy_coeff = vdupq_n_s16(Gy[ki + 1][kj + 1]);
-                    gradX = vmlaq_s16(gradX, anchor_vector_int, Gx_coeff); // vector multiply filter by Gx coefficients and accumulate
-                    gradY = vmlaq_s16(gradY, anchor_vector_int, Gy_coeff); // vector multiply filter by Gy coefficients and accumulate
+                    int16x8_t anchor_vector_int = vreinterpretq_s16_u16(vmovl_u8(anchor_vector)); // cast uint8x8 to int16x8 in order for calculations to work
+                    int16x8_t Gx_coeff = vdupq_n_s16(Gx[ki + 1][kj + 1]); // duplicate current Gx filter coefficient into all elements of int16x8 vector
+                    int16x8_t Gy_coeff = vdupq_n_s16(Gy[ki + 1][kj + 1]); // duplicate current Gy filter coefficient into all elements of int16x8 vector
+                    gradX = vmlaq_s16(gradX, anchor_vector_int, Gx_coeff); // vector multiply the pixels by Gx coefficients and accumulate to gradient vector
+                    gradY = vmlaq_s16(gradY, anchor_vector_int, Gy_coeff); // vector multiply the pixels by Gy coefficients and accumulate to gradient vector
                 }
             }
 
-            int16x8_t absGradX = vabsq_s16(gradX);
+            int16x8_t absGradX = vabsq_s16(gradX); // find abs of gradient vector
             int16x8_t absGradY = vabsq_s16(gradY);
             int16x8_t gradMag = vaddq_s16(absGradX, absGradY); // approximate gradient magnitude from absolute value of component sums
 
-            uint16x8_t gradMag_u = vreinterpretq_u16_s16(gradMag);
+            uint16x8_t gradMag_u = vreinterpretq_u16_s16(gradMag); // cast int16x8 to uint16x8
             uint8x8_t result_vec = vqmovn_u16(gradMag_u); // compute max on all vector elements such that they are less than 255
 
             vst1_u8(&sobel.ptr<uchar>(row)[j], result_vec); // set BGR elements of pixel to corresponding filtered value
