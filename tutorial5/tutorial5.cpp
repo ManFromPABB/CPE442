@@ -95,20 +95,35 @@ int main(int argc, char *argv[]) {
 
     // setup PAPI library and make sure it's initialized
     if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT) {
+        printf("PAPI Failed to Initialize\n");
         exit(1);
     }
 
     // declare 3 event counters for L1 data cache misses, L2 data cache misses, and total instructions executed
-    int events[3] = {PAPI_L1_DCM, PAPI_L2_DCM, PAPI_TOT_INS};
+    int events[3];
+    if (PAPI_event_name_to_code("perf::PERF_COUNT_HW_CACHE_L1D:MISS", &events[0]) != PAPI_OK)
+    {
+         printf("PAPI Failed to add L1 code\n");
+    }
+        if (PAPI_event_name_to_code("perf::PERF_COUNT_HW_CACHE_LL:MISS", &events[1]) != PAPI_OK)
+    {
+         printf("PAPI Failed to add L2 code\n");
+    }
+        if (PAPI_event_name_to_code("PERF_COUNT_HW_INSTRUCTIONS", &events[2]) != PAPI_OK)
+    {
+         printf("PAPI Failed to add INST CNT code\n");
+    }
     long long values[3];
     int event_set = PAPI_NULL;
     if (PAPI_create_eventset(&event_set) != PAPI_OK) { // create the event set
+        printf("PAPI Failed to create event set\n");
         exit(1);
     }
 
     // add each event counter to the set of measured events
     for (int i = 0; i < 3; i++) {
         if (PAPI_add_event(event_set, events[i]) != PAPI_OK) {
+            printf("PAPI Failed to add event\n");
             exit(1);
         }
     }
